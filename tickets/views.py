@@ -2,7 +2,6 @@ from django.views import View
 from django.http.response import HttpResponse
 from django.shortcuts import render, redirect
 from django.views.generic.base import TemplateView
-from django.views.generic.base import RedirectView
 
 
 class WelcomeView(View):
@@ -47,7 +46,7 @@ class TicketQueue(object):
             self._instance = super(TicketQueue, self).__new__(self)
             self.queue = {self.change_oil: [], self.inflate_tires: [], self.diagnostic: []}
             self.next_ticket_number = 1
-            self.temporary_queue = []
+            self.tmp = None
         return self._instance
 
     def enqueue_ticket(self, ticket):
@@ -80,22 +79,30 @@ class TicketQueue(object):
 
     def get_next_ticket_from_queue(self):
         if self.queue.get(self.change_oil):
-            return self.queue.get(self.change_oil).pop(0)
+            return self.queue.get(self.change_oil)[0]
         else:
             if self.queue.get(self.inflate_tires):
-                return self.queue.get(self.inflate_tires).pop(0)
+                return self.queue.get(self.inflate_tires)[0]
             else:
                 if self.queue.get(self.diagnostic):
-                    return self.queue.get(self.diagnostic).pop(0)
+                    return self.queue.get(self.diagnostic)[0]
         return None
 
-    def get_ticket_to_processing(self):
-        next_ticket_from_queue = self.get_next_ticket_from_queue()
-        if next_ticket_from_queue is None:
+    def remove_ticket_from_queue(self):
+        if not self.tmp:
             return None
-        else:
-            self.temporary_queue.append(next_ticket_from_queue)
-            return self.temporary_queue.pop(0)
+        self.queue.get(self.tmp.get_ticket_type()).pop(0)
+
+    def set_tmp_queue(self):
+        self.tmp = self.get_next_ticket_from_queue()
+
+    def get_next_ticket(self):
+        return self.tmp
+
+    def get_ticket_to_processing(self):
+        self.set_tmp_queue()
+        self.remove_ticket_from_queue()
+        return self.tmp
 
 
 class Ticket:
@@ -125,7 +132,6 @@ class Ticket:
 class ProcessingView(View):
     template_name = 'tickets/operator_menu.html'
 
-
     def get(self, request, *args, **kwargs):
         change_oil, inflate_tires, get_diagnostic = TicketQueue().get_queue_status()
         data = {'change_oil_number': change_oil,
@@ -134,24 +140,24 @@ class ProcessingView(View):
         return render(request, template_name=self.template_name, context=data)
 
     def post(self, request, *args, **kwargs):
+        next_ticket = None
+        ticket = TicketQueue().get_ticket_to_processing()
+        if ticket:
+            next_ticket = ticket.get_ticket_number()
         request.POST.get("next_ticket")
-        self.get_next_processing_ticket_number()
-        return redirect("next/")
-
-    def get_next_processing_ticket_number(self):
-        next_ticket = TicketQueue().get_next_ticket_from_queue()
-        self.processing_ticket_numbers.append(next_ticket)
-        next_processing_ticket = self.processing_ticket_numbers.pop(0)
-        if next_processing_ticket is None:
-            return None
-        else:
-            return next_processing_ticket.get_ticket_number()
+        return redirect("/next/"+str(next_ticket), *args, **kwargs)
 
 
-class NextNumberView(View):
-    template_name = 'tickets/next.html'
+class NextView(View):
+    template_name = "tickets/next.html"
 
     def get(self, request, *args, **kwargs):
-        next_ticket_number = ProcessingView().get_next_processing_ticket_number()
-        data = {"next_ticket": next_ticket_number}
+        ticket = TicketQueue().get_next_ticket()
+        if "next_ticket" in kwargs:
+            next_ticket = kwargs["next_ticket"]
+        else:
+            next_ticket = None
+            if ticket:
+                next_ticket = ticket.get_ticket_number()
+        data = {"next_ticket": next_ticket}
         return render(request, self.template_name, context=data)
